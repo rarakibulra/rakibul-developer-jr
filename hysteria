@@ -1,0 +1,6 @@
+#!/bin/bash
+if [ "$(systemctl is-active hysteria-server.service)" = failed ];
+then
+service hysteria-server restart
+systemctl restart hysteria-server
+fi

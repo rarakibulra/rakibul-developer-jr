@@ -1,0 +1,257 @@
+#!/bin/bash
+service=$1
+ip=$(curl -s https://api.ipify.org)
+os="$(neofetch os)"; os="${os##*: }"
+distro="$(neofetch distro)"; distro="${distro##*: }"
+cpu="$(neofetch cpu --cpu_speed on --cpu_cores off)"; cpu="${cpu##*: }"
+memory="$(neofetch memory)"; memory="${memory##*: }"
+disk="$(neofetch disk)"; disk="${disk##*: }"
+uptime="$(neofetch uptime)"; uptime="${uptime##*: }"
+bandwidth=$(vnstat --oneline | cut -d ";" -f 15)
+
+if [[ $service == "ssh" ]];
+then
+ssh=$(systemctl is-active sshd)
+dropbear=$((echo >/dev/tcp/localhost/44) &>/dev/null && echo "active" || echo "inactive")
+squid=$(systemctl is-active squid)
+ssl=$(systemctl is-active stunnel4)
+socket=$((echo >/dev/tcp/localhost/80) &>/dev/null && echo "active" || echo "inactive")
+total_sshd=$(netstat -natp | awk "/$ip:22\y/ && /ESTABLISHED/ && /sshd/" | wc -l)
+total_dropbear=$(netstat -natp | awk "/$ip:44\y/ && /ESTABLISHED/ && /dropbear/" | wc -l)
+total_socket=$(netstat -natp | awk "/$ip:80\y/ && /ESTABLISHED/ && /python/" | wc -l)
+total_ssl=$(netstat -natp | awk "/$ip:443\y/ && /ESTABLISHED/ && /stunnel4/" | wc -l)
+totalssh=$((total_sshd + total_dropbear + total_socket + total_ssl))
+. /root/.ports
+
+output=$(cat <<EOF
+{
+ "service": "ssh protocol",
+ "ip": "$ip",
+ "users": "$totalssh",
+ "bandwidth": "$bandwidth",
+ "os": "$os",
+ "distro": "$distro",
+ "cpu": "$cpu",
+ "memory": "$memory",
+ "disk": "$disk",
+ "uptime": "$uptime",
+ "ssh_port": "$ssh_port - $ssh",
+ "dropbear_port": "$dropbear_port - $dropbear",
+ "socket_port": "$socket_port - $socket",
+ "squid_port": "$squid_port - $squid",
+ "ssh_ssl_port": "$ssh_ssl_port - $ssl",
+ "dropbear_ssl_port": "$dropbear_ssl_port - $ssl"
+}
+EOF
+)
+
+echo $output
+
+elif [[ $service == "hysteria" ]];
+then
+udphysteria=$(systemctl is-active hysteria-server.service)
+squid=$(systemctl is-active squid)
+total_hysteria=$(netstat -natp | awk "/$ip:53/ && /ESTABLISHED/ && /hysteria/" | wc -l)
+. /root/.ports
+. /root/.db-base
+
+output=$(cat <<EOF
+{
+ "service": "openvpn protocol",
+ "ip": "$ip",
+ "users": "$totalovpn",
+ "bandwidth": "$bandwidth",
+ "os": "$os",
+ "distro": "$distro",
+ "cpu": "$cpu",
+ "memory": "$memory",
+ "disk": "$disk",
+ "uptime": "$uptime",
+ "udp_hysteria": "$hysteria_port - $udphysteria",
+ "squid_port": "$squid_port - $squid"
+}
+EOF
+)
+
+mysql -u $DB_USER -p$DB_PASS -D $DB_NAME -h $DB_HOST -e "UPDATE server_list SET cpu_model='$cpu', distro='$distro', memory='$memory', uptime='$uptime', disk='$disk', bandwidth='$bandwidth', os='$os', proto='$service', hysteria_status='$udphysteria', squid_status='$squid', hysteria_port='$hysteria_port', squid='$squid_port', hysteria_online='$total_hysteria' WHERE server_ip='$ip' "
+
+elif [[ $service == "socksip" ]];
+then
+udpSERVER=$(systemctl is-active UDPserver)
+squid=$(systemctl is-active squid)
+
+. /root/.ports
+. /root/.db-base
+
+mysql -u $DB_USER -p$DB_PASS -D $DB_NAME -h $DB_HOST -e "UPDATE server_list SET cpu_model='$cpu', distro='$distro', memory='$memory', uptime='$uptime', disk='$disk', bandwidth='$bandwidth', os='$os', proto='$service', socksip_status='$udpSERVER', socksip_port='$socksip_port' WHERE server_ip='$ip' "
+
+
+elif [[ $service == "openvpn" ]];
+then
+tcpovpn=$(systemctl is-active openvpn@server2.service)
+udpovpn=$(systemctl is-active openvpn@server.service)
+udphysteria=$(systemctl is-active hysteria-server.service)
+squid=$(systemctl is-active squid)
+ssl=$(systemctl is-active stunnel4)
+socket=$((echo >/dev/tcp/localhost/80) &>/dev/null && echo "active" || echo "inactive")
+tcpusers=$(sed -n -e '/^ROUTING_TABLE/p' /etc/openvpn/server/tcpclient.log | wc -l)
+udpusers=$(sed -n -e '/^ROUTING_TABLE/p' /etc/openvpn/server/udpclient.log | wc -l)
+totalovpn=$((tcpusers + udpusers))
+total_hysteria=$(netstat -natp | awk "/$ip:53/ && /ESTABLISHED/ && /hysteria/" | wc -l)
+. /root/.ports
+. /etc/openvpn/login/config.sh
+
+output=$(cat <<EOF
+{
+ "service": "openvpn protocol",
+ "ip": "$ip",
+ "users": "$totalovpn",
+ "bandwidth": "$bandwidth",
+ "os": "$os",
+ "distro": "$distro",
+ "cpu": "$cpu",
+ "memory": "$memory",
+ "disk": "$disk",
+ "uptime": "$uptime",
+ "udp_hysteria": "$hysteria_port - $udphysteria",
+ "tcp_port": "$tcp_port - $tcpovpn",
+ "udp_port": "$udp_port - $udpovpn",
+ "socket_port": "$socket_port - $socket",
+ "squid_port": "$squid_port - $squid",
+ "tcp_ssl_port": "$tcp_ssl_port - $ssl",
+ "udp_ssl_port": "$udp_ssl_port - $ssl"
+}
+EOF
+)
+
+mysql -u $USER -p$PASS -D $DB -h $HOST -e "UPDATE server_list SET cpu_model='$cpu', distro='$distro', memory='$memory', uptime='$uptime', disk='$disk', bandwidth='$bandwidth', os='$os', proto='$service', tcpssl='$tcp_ssl_port', udpssl='$udp_ssl_port', tcp_status='$tcpovpn', hysteria_status='$udphysteria', udp_status='$udpovpn', ssl_status='$ssl', squid_status='$squid', socket_status='$socket', tcp='$tcp_port', udp='$udp_port', hysteria_port='$hysteria_port', squid='$squid_port', socket='$socket_port', online='$totalovpn', hysteria_online='$total_hysteria' WHERE server_ip='$ip' "
+
+elif [[ $service == "aio" ]];
+then
+tcpovpn=$(systemctl is-active openvpn@server2.service)
+udpovpn=$(systemctl is-active openvpn@server.service)
+udphysteria=$(systemctl is-active hysteria-server.service)
+xray=$(systemctl is-active xray.service)
+slowdns=$(systemctl is-active server-sldns.service)
+sshd=$(systemctl is-active sshd)
+dropbear=$(systemctl is-active dropbear)
+squid=$(systemctl is-active squid)
+ssl=$(systemctl is-active stunnel4)
+socket=$((echo >/dev/tcp/localhost/80) &>/dev/null && echo "active" || echo "inactive")
+tcpusers=$(sed -n -e '/^ROUTING_TABLE/p' /etc/openvpn/server/tcpclient.log | wc -l)
+udpusers=$(sed -n -e '/^ROUTING_TABLE/p' /etc/openvpn/server/udpclient.log | wc -l)
+totalovpn=$((tcpusers + udpusers))
+total_sshd=$(netstat -natp | awk "/$ip:22/ && /ESTABLISHED/ && /sshd/" | wc -l)
+total_dropbear=$(netstat -natp | awk "/$ip:441/ && /ESTABLISHED/ && /dropbear/" | wc -l)
+total_socket1=$(netstat -natp | awk "/$ip:8000/ && /ESTABLISHED/ && /python/" | wc -l)
+total_socket2=$(netstat -natp | awk "/$ip:8001/ && /ESTABLISHED/ && /python/" | wc -l)
+total_socket3=$(netstat -natp | awk "/$ip:8002/ && /ESTABLISHED/ && /python/" | wc -l)
+total_sshssl=$(netstat -natp | awk "/$ip:445/ && /ESTABLISHED/ && /stunnel4/" | wc -l)
+totalssh=$((total_sshd + total_dropbear + total_socket1 + total_socket2 + total_socket3 + total_sshssl))
+total_hysteria=$(netstat -natp | awk "/$ip:53/ && /ESTABLISHED/ && /hysteria/" | wc -l)
+. /root/.ports
+. /etc/openvpn/login/config.sh
+
+mysql -u $USER -p$PASS -D $DB -h $HOST -e "UPDATE server_list SET cpu_model='$cpu', distro='$distro', memory='$memory', uptime='$uptime', disk='$disk', bandwidth='$bandwidth', os='$os', proto='$service', tcpssl='$tcp_ssl_port', udpssl='$udp_ssl_port', tcp_status='$tcpovpn', hysteria_status='$udphysteria', xray_status='$xray', ssh_online='$totalssh', slowdns_status='$slowdns', ssh_status='$sshd', dropbear_status='$dropbear', udp_status='$udpovpn', ssl_status='$ssl', squid_status='$squid', socket_status='$socket', tcp='$tcp_port', udp='$udp_port', hysteria_port='$hysteria_port', xray_port='$xray_port', slowdns_port='$slowdns_port', ssh_port='$ssh_port', dropbear_port='$dropbear_port', squid='$squid_port', socket='$socket_port', online='$totalovpn', hysteria_online='$total_hysteria' WHERE server_ip='$ip' "
+
+elif [[ $service == "openconnect" ]];
+then
+ocserv=$(systemctl is-active ocserv)
+udphysteria=$(systemctl is-active hysteria-server.service)
+squid=$(systemctl is-active squid)
+ssl=$(systemctl is-active stunnel4)
+socket=$((echo >/dev/tcp/localhost/80) &>/dev/null && echo "active" || echo "inactive")
+#totalocserv=$(echo $(occtl -j -n  show users) | jq ". | length")
+totalocserv=$(netstat -natp | awk "/$ip:1194/ && /ESTABLISHED/ && /ocserv/" | wc -l)
+total_hysteria=$(netstat -natp | awk "/$ip:53/ && /ESTABLISHED/ && /hysteria/" | wc -l)
+. /root/.ports
+. /root/.db-base
+
+output=$(cat <<EOF
+{
+ "service": "openconnect protocol",
+ "ip": "$ip",
+ "users": "$totalocserv",
+ "bandwidth": "$bandwidth",
+ "os": "$os",
+ "distro": "$distro",
+ "cpu": "$cpu",
+ "memory": "$memory",
+ "disk": "$disk",
+ "uptime": "$uptime",
+ "udp_hysteria": "$hysteria_port - $udphysteria",
+ "tcp_port": "$tcp_port - $ocserv",
+ "socket_port": "$socket_port - $socket",
+ "squid_port": "$squid_port - $squid",
+ "tcp_ssl_port": "$tcp_ssl_port - $ssl",
+ "udp_ssl_port": "$udp_ssl_port - $ssl"
+}
+EOF
+)
+
+mysql -u $DB_USER -p$DB_PASS -D $DB_NAME -h $DB_HOST -e "UPDATE server_list SET cpu_model='$cpu', distro='$distro', memory='$memory', uptime='$uptime', disk='$disk', bandwidth='$bandwidth', os='$os', proto='$service', tcpssl='$tcp_ssl_port', udpssl='$udp_ssl_port', tcp_status='$ocserv', hysteria_status='$udphysteria', udp_status='$ocserv', ssl_status='$ssl', squid_status='$squid', socket_status='$socket', tcp='$tcp_port', udp='$udp_port', hysteria_port='$hysteria_port', squid='$squid_port', socket='$socket_port', online='$totalocserv', hysteria_online='$total_hysteria' WHERE server_ip='$ip' "
+
+elif [[ $service == "openconnect" ]];
+then
+ocserv=$(systemctl is-active ocserv)
+udphysteria=$(systemctl is-active hysteria-server.service)
+squid=$(systemctl is-active squid)
+ssl=$(systemctl is-active stunnel4)
+socket=$((echo >/dev/tcp/localhost/80) &>/dev/null && echo "active" || echo "inactive")
+totalocserv=$(echo $(occtl -j -n  show users) | jq ". | length")
+total_hysteria=$(netstat -natp | awk "/$ip:53/ && /ESTABLISHED/ && /hysteria/" | wc -l)
+. /root/.ports
+
+output=$(cat <<EOF
+{
+ "service": "openconnect protocol",
+ "ip": "$ip",
+ "users": "$totalocserv",
+ "bandwidth": "$bandwidth",
+ "os": "$os",
+ "distro": "$distro",
+ "cpu": "$cpu",
+ "memory": "$memory",
+ "disk": "$disk",
+ "uptime": "$uptime",
+ "udp_hysteria": "$hysteria_port - $udphysteria",
+ "tcp_port": "$tcp_port - $ocserv",
+ "socket_port": "$socket_port - $socket",
+ "squid_port": "$squid_port - $squid",
+ "tcp_ssl_port": "$tcp_ssl_port - $ssl",
+ "udp_ssl_port": "$udp_ssl_port - $ssl"
+}
+EOF
+)
+
+mysql -u $USER -p$PASS -D $DB -h $HOST -e "UPDATE server_list SET cpu_model='$cpu', distro='$distro', memory='$memory', uptime='$uptime', disk='$disk', bandwidth='$bandwidth', os='$os', proto='$service', tcpssl='$tcp_ssl_port', udpssl='$udp_ssl_port', tcp_status='$tcpovpn', hysteria_status='$udphysteria', udp_status='$udpovpn', ssl_status='$ssl', squid_status='$squid', socket_status='$socket', tcp='$tcp_port', udp='$udp_port', hysteria_port='$hysteria_port', squid='$squid_port', socket='$socket_port', online='$totalocserv', hysteria_online='$total_hysteria' WHERE server_ip='$ip' "
+
+
+elif [[ $service == "pptp" ]];
+then
+pptpd=$(systemctl is-active pptpd)
+
+output=$(cat <<EOF
+{
+ "service": "pptp protocol",
+ "ip": "$ip",
+ "bandwidth": "$bandwidth",
+ "pptpd": "$pptpd",
+ "os": "$os",
+ "distro": "$distro",
+ "cpu": "$cpu",
+ "memory": "$memory",
+ "disk": "$disk",
+ "uptime": "$uptime"
+}
+EOF
+)
+
+echo $output
+
+elif [[ $service == "reboot" ]];
+then
+sudo shutdown -r now
+fi
+
+#RaDeveloper
