@@ -1,0 +1,11 @@
+Port 22
+PermitRootLogin yes
+ChallengeResponseAuthentication no
+UsePAM yes
+AllowTcpForwarding yes
+X11Forwarding yes
+PrintMotd no
+AcceptEnv LANG LC_*
+Subsystem       sftp    /usr/lib/openssh/sftp-server
+Banner /etc/banner
+#AllowGroups dnsroot

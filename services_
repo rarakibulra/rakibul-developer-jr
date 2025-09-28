@@ -1,0 +1,17 @@
+#!/bin/bash
+source /root/.dns/config
+iptables-restore < /etc/iptables_rules.v4
+iptables6-restore < /etc/iptables_rules.v6
+screen -c "/etc/.dnsquest/.sckey" -dmS slowdns1 /etc/.dnsquest/dnstt-server -udp :5300 -privkey $privkey $domain 127.0.0.1:22 &>/dev/null
+if [[ $dnsresolvertype == "doh" ]]
+then
+screen -c "/etc/.dnsquest/.sckey" -dmS slowdns2 /etc/.dnsquest/dnstt-client -doh $dnsresolver -pubkey $pubkey $domain 127.0.0.1:2222 &>/dev/null	
+else
+screen -c "/etc/.dnsquest/.sckey" -dmS slowdns2 /etc/.dnsquest/dnstt-client -udp $dnsresolver -pubkey $pubkey $domain 127.0.0.1:2222 &>/dev/null
+fi
+screen -c "/etc/.dnsquest/.sckey" -dmS suckmysocks_ssh python /etc/.dnsquest/socks-ssh.py -b 0.0.0.0 -p 80 &>/dev/null
+screen -c "/etc/.dnsquest/.sckey" -dmS suckmysocks_ssl python /etc/.dnsquest/socks-ssl.py -b 0.0.0.0 -p 443 &>/dev/null
+screen -c "/etc/.dnsquest/.sckey" -dmS suckmysocks python /etc/.dnsquest/socks.py -b 0.0.0.0 -p 8000 &>/dev/null
+screen -c "/etc/.dnsquest/.sckey" -dmS webinfo php -S 0.0.0.0:5623 -t /root/web &>/dev/null
+sudo service stunnel4 restart
+sudo service dropbear restart
